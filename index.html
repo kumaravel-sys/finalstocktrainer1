@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>VSE — Stock Trainer</title>
+  <style>
+    :root{--bg:#0b0c0f;--card:#121315;--muted:#9aa0a6;--accent:#14b8a6;--btn:#0a84ff}
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#e6eef3}
+    header{padding:18px;text-align:center;background:#060607;font-size:20px}
+    .wrap{max-width:980px;margin:18px auto;padding:12px}
+    .card{background:var(--card);padding:14px;border-radius:10px;margin-bottom:14px;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+    input,select,textarea,button{padding:8px;border-radius:8px;border:0;margin:6px 0;background:#0f1113;color:#e6eef3}
+    button{cursor:pointer;background:var(--btn);color:#fff}
+    .btn-ghost{background:transparent;border:1px solid #2b2b2b}
+    .row{display:flex;gap:12px;align-items:center}
+    .col{flex:1}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #1b1b1d;text-align:left}
+    .muted{color:var(--muted)}
+    .hidden{display:none}
+    .small{font-size:13px}
+    .green{color:#7fe4b7}.red{color:#ff9999}
+    footer{padding:8px;text-align:center;color:var(--muted);font-size:13px}
+    #tradingview_container{height:300px;margin-top:8px}
+  </style>
+
+  <!-- Firebase compat SDKs (single style) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+  <!-- Chart.js (for small portfolio chart) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- TradingView (chart widget) -->
+  <script src="https://s3.tradingview.com/tv.js"></script>
+</head>
+<body>
+  <header>📈 VSE — Stock Trainer</header>
+  <div class="wrap">
+
+    <!-- AUTH CARD -->
+    <div id="authCard" class="card">
+      <h3>Login / Sign up</h3>
+      <div style="max-width:520px;margin:auto">
+        <input id="email" type="email" placeholder="Email (admin or user)"/>
+        <input id="password" type="password" placeholder="Password"/>
+        <div class="row">
+          <button id="btnSignUp">Sign Up</button>
+          <button id="btnSignIn">Sign In</button>
+          <button id="btnSignOut" class="hidden btn-ghost">Sign Out</button>
+        </div>
+
+        <hr/>
+        <div class="row">
+          <button id="btnGuest" class="btn-ghost">Continue as Guest</button>
+          <button id="btnCommon" class="btn-ghost">Enter Common Password</button>
+        </div>
+
+        <p id="authMsg" class="muted small"></p>
+        <p class="small muted">Admin credentials to create in Firebase Auth: <code>admin6@vse.com</code> / <code>adminvse2k25</code></p>
+        <p class="small muted">Common password for guest access: <code>vse2k25</code></p>
+      </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dashboard" class="hidden">
+
+      <!-- header row: welcome + chart -->
+      <div class="card row">
+        <div class="col">
+          <h3 id="welcomeLabel">Welcome</h3>
+          <p class="small muted">Balance: $<span id="balance">0</span></p>
+          <p class="small muted">UID: <span id="uidLabel"></span></p>
+
+          <!-- Search -->
+          <div class="row">
+            <input id="searchInput" placeholder="Search symbol (e.g., AAPL)" />
+            <button id="btnSearch">Search</button>
+          </div>
+        </div>
+
+        <div style="width:420px">
+          <label>Selected Symbol</label>
+          <select id="selectedSymbol"></select>
+          <div id="quoteBox" class="small muted">Price: <span id="price">-</span> &nbsp; Change: <span id="change">-</span></div>
+          <div id="tradingview_container"></div>
+        </div>
+      </div>
+
+      <!-- Watchlist & actions -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h4>Watchlist</h4>
+          <div>
+            <button id="btnRefresh" class="btn-ghost">Refresh Prices</button>
+            <button id="btnEditWatchlist" class="btn-ghost">Edit Watchlist (Admin)</button>
+          </div>
+        </div>
+
+        <table id="watchlistTable">
+          <thead><tr><th>Symbol</th><th>Price</th><th>Change%</th><th>Action</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <!-- Trade -->
+      <div class="card">
+        <h4>Buy / Sell</h4>
+        <div class="row">
+          <select id="tradeSymbol" style="max-width:220px"></select>
+          <input id="tradeQty" type="number" placeholder="Qty" style="max-width:120px"/>
+          <button id="btnBuy">Buy</button>
+          <button id="btnSell">Sell</button>
+        </div>
+        <p id="tradeMsg" class="muted small"></p>
+      </div>
+
+      <!-- Portfolio & chart -->
+      <div class="card row">
+        <div class="col">
+          <h4>Your Portfolio</h4>
+          <p class="small muted">Balance: $<span id="balance2">0</span></p>
+          <table id="portfolioTable">
+            <thead><tr><th>Symbol</th><th>Qty</th><th>Price</th><th>Value</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div style="width:360px">
+          <h4>Portfolio Split</h4>
+          <canvas id="portfolioChart"></canvas>
+          <h4 style="margin-top:12px">Transactions</h4>
+          <div id="txList" style="max-height:200px;overflow:auto" class="small muted"></div>
+        </div>
+      </div>
+
+      <!-- Leaderboard -->
+      <div id="leaderboardCard" class="card hidden">
+        <h4>Leaderboard (Top balances)</h4>
+        <div id="leaderboard" class="small muted"></div>
+      </div>
+
+      <!-- Admin Panel -->
+      <div id="adminCard" class="card hidden">
+        <h4>Admin Panel</h4>
+        <div class="row">
+          <button id="btnReloadUsers">Reload Users</button>
+          <button id="btnResetBalances">Reset All Balances</button>
+          <button id="btnSaveWatchlist">Save Watchlist</button>
+        </div>
+        <div id="adminUsers" class="small muted" style="margin-top:10px"></div>
+        <div style="margin-top:12px">
+          <label>Edit watchlist (comma separated):</label>
+          <textarea id="editWatchlist" rows="2" style="width:100%"></textarea>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <footer class="muted small">Deploy this file to GitHub Pages. Replace firebaseConfig and FINNHUB_KEY below.</footer>
+
+  <!-- ===== APP SCRIPT ===== -->
+  <script>
+  /************************************************************************
+   * Single-file VSE Stock Trainer
+   * BEFORE DEPLOY: Replace firebaseConfig and FINNHUB_KEY with your values.
+   ************************************************************************/
+
+  // ------------- CONFIG - >>> REPLACE THESE <<< ----------------
+  <!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<script>
+  // Your Firebase config
+  const firebaseConfig = {
+    apiKey: "AIzaSyD0k1_nqTViPFA9al6PlPeoGRDRdstURcQ",
+    authDomain: "vsesvv-e91a8.firebaseapp.com",
+    projectId: "vsesvv-e91a8",
+    storageBucket: "vsesvv-e91a8.appspot.com",
+    messagingSenderId: "433798717859",
+    appId: "1:433798717859:web:dd7a203cfa1e3ef8753a16"
+  };
+
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+</script>
+
+  // Finnhub key (demo) - replace with your own for higher quota
+  const FINNHUB_KEY = "d3bm7n1r01qqg7bv706gd3bm7n1r01qqg7bv7070";
+
+  // admin & common password constants (these are the credentials you asked)
+  const ADMIN_EMAIL = "admin6@vse.com";
+  const ADMIN_PASSWORD = "adminvse2k25";
+  const COMMON_PASSWORD = "vse2k25";
+
+  // default watchlist (overridden by Firestore settings if present)
+  const DEFAULT_WATCHLIST = ["AAPL","MSFT","TSLA","AMZN","GOOGL","META","NVDA","NFLX","INTC"];
+
+  // ------------- initialize firebase -------------
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // ------------- DOM refs -------------
+  const authMsg = document.getElementById('authMsg');
+  const btnSignUp = document.getElementById('btnSignUp');
+  const btnSignIn = document.getElementById('btnSignIn');
+  const btnSignOut = document.getElementById('btnSignOut');
+  const btnGuest = document.getElementById('btnGuest');
+  const btnCommon = document.getElementById('btnCommon');
+  const btnRefresh = document.getElementById('btnRefresh');
+  const btnEditWatchlist = document.getElementById('btnEditWatchlist');
+  const btnSaveWatchlist = document.getElementById('btnSaveWatchlist');
+  const btnReloadUsers = document.getElementById('btnReloadUsers');
+  const btnResetBalances = document.getElementById('btnResetBalances');
+  const searchInput = document.getElementById('searchInput');
+  const btnSearch = document.getElementById('btnSearch');
+
+  const selectedSymbol = document.getElementById('selectedSymbol');
+  const watchlistTableBody = document.querySelector('#watchlistTable tbody');
+  const tradeSymbol = document.getElementById('tradeSymbol');
+  const tradeQty = document.getElementById('tradeQty');
+  const btnBuy = document.getElementById('btnBuy');
+  const btnSell = document.getElementById('btnSell');
+  const tradeMsg = document.getElementById('tradeMsg');
+  const portfolioTableBody = document.querySelector('#portfolioTable tbody');
+  const balanceEl = document.getElementById('balance');
+  const balanceEl2 = document.getElementById('balance2');
+  const uidLabel = document.getElementById('uidLabel');
+  const welcomeLabel = document.getElementById('welcomeLabel');
+  const txList = document.getElementById('txList');
+  const leaderboard = document.getElementById('leaderboard');
+  const adminCard = document.getElementById('adminCard');
+  const editWatchlist = document.getElementById('editWatchlist');
+
+  // TradingView container id must exist
+  const tvContainer = 'tradingview_container';
+
+  // ------------- state -------------
+  let WATCHLIST = [...DEFAULT_WATCHLIST];
+  let prices = {}; // symbol -> {c,d,dp}
+  let currentUser = null;
+  let portfolioChart = null;
+
+  // helpers
+  function setAuthMsg(s){ authMsg.textContent = s; }
+  function setTradeMsg(s){ tradeMsg.textContent = s; }
+  function formatMoney(n){ return Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  // ---------- AUTH HANDLERS ----------
+  btnSignUp.onclick = async () => {
+    const email = document.getElementById('email').value.trim();
+    const pass = document.getElementById('password').value.trim();
+    if(!email||!pass){ setAuthMsg('Enter email and password'); return; }
+    try{ await auth.createUserWithEmailAndPassword(email,pass); setAuthMsg('Account created'); }
+    catch(e){ setAuthMsg('Sign-up error: ' + e.message); }
+  };
+
+  btnSignIn.onclick = async () => {
+    const email = document.getElementById('email').value.trim();
+    const pass = document.getElementById('password').value.trim();
+    if(!email||!pass){ setAuthMsg('Enter email and password'); return; }
+    try{ await auth.signInWithEmailAndPassword(email,pass); setAuthMsg('Signed in'); }
+    catch(e){ setAuthMsg('Sign-in error: ' + e.message); }
+  };
+
+  btnSignOut.onclick = () => auth.signOut();
+
+  btnGuest.onclick = async () => {
+    try{ await auth.signInAnonymously(); setAuthMsg('Guest session'); }
+    catch(e){ setAuthMsg('Guest error: ' + e.message); }
+  };
+
+  btnCommon.onclick = async () => {
+    const pass = document.getElementById('password').value.trim();
+    if(pass !== COMMON_PASSWORD){ setAuthMsg('Wrong common password'); return; }
+    try{ await auth.signInAnonymously(); setAuthMsg('Signed in with common password'); }
+    catch(e){ setAuthMsg('Error: ' + e.message); }
+  };
+
+  // Search
+  btnSearch.onclick = async () => {
+    const q = searchInput.value.trim().toUpperCase();
+    if(!q) return setAuthMsg('Enter symbol to search');
+    // set selected symbol and update chart/quote
+    selectedSymbol.value = q;
+    showTradingView(q);
+    await displayQuote(q);
+  };
+
+  // ---------- AUTH STATE ----------
+  auth.onAuthStateChanged(async user => {
+    if(!user){
+      currentUser = null;
+      document.getElementById('dashboard').classList.add('hidden');
+      document.getElementById('authCard').classList.remove('hidden');
+      btnSignOut.classList.add('hidden');
+      setAuthMsg('Not logged in');
+      return;
+    }
+    // user signed in
+    currentUser = user;
+    document.getElementById('dashboard').classList.remove('hidden');
+    document.getElementById('authCard').classList.add('hidden');
+    btnSignOut.classList.remove('hidden');
+
+    uidLabel.textContent = user.uid;
+    welcomeLabel.textContent = (user.email || 'Guest').slice(0,40);
+
+    // ensure user doc exists
+    const uref = db.collection('users').doc(user.uid);
+    const snap = await uref.get();
+    if(!snap.exists){
+      await uref.set({ balance:100000, portfolio:{}, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    }
+
+    // admin check: show admin panel only if /admins/{uid}.admin == true
+    const adminSnap = await db.collection('admins').doc(user.uid).get();
+    if(adminSnap.exists && adminSnap.data().admin === true){
+      adminCard.classList.remove('hidden');
+      document.getElementById('leaderboardCard').classList.remove('hidden');
+    } else {
+      adminCard.classList.add('hidden');
+      document.getElementById('leaderboardCard').classList.add('hidden');
+    }
+
+    // load watchlist (FireStore settings or default)
+    await loadWatchlistFromFirestore();
+    await refreshAllPrices();
+    await refreshUI();
+    watchUserDoc(user.uid);
+    loadLeaderboard();
+  });
+
+  // watch user doc
+  function watchUserDoc(uid){
+    db.collection('users').doc(uid).onSnapshot(doc=>{
+      if(!doc.exists) return;
+      const data = doc.data();
+      const bal = Number(data.balance || 0);
+      balanceEl.textContent = formatMoney(bal);
+      balanceEl2.textContent = formatMoney(bal);
+      renderPortfolio(data.portfolio || {});
+      loadTransactions(uid);
+      updatePortfolioChart(data.portfolio || {});
+    });
+  }
+
+  // ---------- WATCHLIST ----------
+  async function loadWatchlistFromFirestore(){
+    try{
+      const sdoc = await db.collection('settings').doc('watchlist').get();
+      if(sdoc.exists && Array.isArray(sdoc.data().symbols) && sdoc.data().symbols.length>0){
+        WATCHLIST = sdoc.data().symbols;
+      } else {
+        WATCHLIST = [...DEFAULT_WATCHLIST];
+      }
+      renderWatchlist();
+    }catch(e){
+      WATCHLIST = [...DEFAULT_WATCHLIST];
+      renderWatchlist();
+    }
+  }
+
+  async function saveWatchlistToFirestore(){
+    if(!currentUser) return setAuthMsg('Sign in as admin to save');
+    await db.collection('settings').doc('watchlist').set({ symbols: WATCHLIST });
+    setAuthMsg('Watchlist saved');
+  }
+
+  function renderWatchlist(){
+    selectedSymbol.innerHTML = '';
+    tradeSymbol.innerHTML = '';
+    watchlistTableBody.innerHTML = '';
+    WATCHLIST.forEach(sym=>{
+      const tr = document.createElement('tr');
+      const p = prices[sym] ? formatMoney(prices[sym].c) : '-';
+      const dp = prices[sym] ? prices[sym].dp : 0;
+      const changeClass = dp>=0 ? 'green' : 'red';
+      tr.innerHTML = `<td>${sym}</td><td>$${p}</td><td class="${changeClass}">${dp?dp.toFixed(2)+'%':'-'}</td>
+                      <td><button class="btn-view" data-sym="${sym}">View</button></td>`;
+      watchlistTableBody.appendChild(tr);
+
+      const o1 = document.createElement('option'); o1.value=sym; o1.textContent=sym; selectedSymbol.appendChild(o1);
+      const o2 = document.createElement('option'); o2.value=sym; o2.textContent=sym; tradeSymbol.appendChild(o2);
+    });
+
+    document.querySelectorAll('.btn-view').forEach(b=> b.onclick = e => {
+      const s = e.target.dataset.sym;
+      selectedSymbol.value = s;
+      showTradingView(s);
+      displayQuote(s);
+    });
+
+    if(WATCHLIST.length>0){
+      selectedSymbol.value = WATCHLIST[0];
+      showTradingView(WATCHLIST[0]);
+      displayQuote(WATCHLIST[0]);
+    }
+  }
+
+  // ---------- PRICE FETCH ----------
+  async function fetchQuote(symbol){
+    try{
+      const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_KEY}`);
+      const j = await r.json();
+      return j; // {c,d,dp,...}
+    }catch(e){ console.error('quote err',e); return null; }
+  }
+
+  async function refreshAllPrices(){
+    const syms = [...new Set(WATCHLIST)];
+    const res = await Promise.all(syms.map(s=>fetchQuote(s).then(j=>({s,j}))));
+    res.forEach(r=>{ if(r.j) prices[r.s] = { c:Number(r.j.c||0), d:Number(r.j.d||0), dp:Number(r.j.dp||0) }});
+    renderWatchlist();
+    if(selectedSymbol.value) displayQuote(selectedSymbol.value);
+  }
+
+  // ---------- TradingView ----------
+  function showTradingView(symbol){
+    try{ if(window.tvWidget) window.tvWidget.remove(); } catch(e){}
+    const tvSymbol = (symbol.includes(':') ? symbol : `NASDAQ:${symbol}`);
+    try{
+      window.tvWidget = new TradingView.widget({
+        autosize: true, symbol: tvSymbol, interval: 'D', timezone: 'Etc/UTC',
+        container_id: tvContainer, theme: 'dark', style: '1', locale: 'en'
+      });
+    }catch(e){ console.warn('TradingView init failed', e); }
+  }
+
+  async function displayQuote(symbol){
+    const q = prices[symbol] || await fetchQuote(symbol);
+    if(q){
+      prices[symbol] = { c:Number(q.c||0), d:Number(q.d||0), dp:Number(q.dp||0) };
+      document.getElementById('price').textContent = formatMoney(prices[symbol].c);
+      const ch = prices[symbol].dp;
+      const el = document.getElementById('change');
+      el.textContent = (ch>=0?'+':'') + (ch ? ch.toFixed(2) + '%' : '-');
+      el.className = ch>=0 ? 'green' : 'red';
+    }
+  }
+
+  // ---------- TRADE (client-side using transaction) ----------
+  async function trade(action){
+    if(!currentUser) return setTradeMsg('Sign in first');
+    const symbol = (tradeSymbol.value || '').toUpperCase();
+    const qty = Math.floor(Number(tradeQty.value));
+    if(!symbol || !qty || qty<=0) return setTradeMsg('Enter symbol and qty>0');
+    setTradeMsg('Processing...');
+    const q = await fetchQuote(symbol);
+    if(!q || !q.c) return setTradeMsg('Price fetch failed');
+    const price = Number(q.c);
+    const userRef = db.collection('users').doc(currentUser.uid);
+
+    try{
+      await db.runTransaction(async tx => {
+        const snap = await tx.get(userRef);
+        if(!snap.exists) throw new Error('User doc missing');
+        let bal = Number(snap.data().balance || 0);
+        const port = Object.assign({}, snap.data().portfolio || {});
+        if(action === 'buy'){
+          const cost = price * qty;
+          if(bal < cost) throw new Error('Insufficient funds');
+          bal -= cost;
+          port[symbol] = (port[symbol] || 0) + qty;
+        } else { // sell
+          const have = port[symbol] || 0;
+          if(have < qty) throw new Error('Not enough shares');
+          port[symbol] = have - qty;
+          if(port[symbol] <= 0) delete port[symbol];
+          bal += price * qty;
+        }
+        tx.set(userRef, { balance: bal, portfolio: port }, { merge: true });
+        const txRef = userRef.collection('transactions').doc();
+        txRef.set({ type: action, symbol, qty, price, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+      });
+      setTradeMsg('Done: ' + action + ' ' + qty + ' ' + symbol + ' @ ' + formatMoney(price));
+      await refreshAllPrices();
+      await refreshUI();
+    }catch(e){ setTradeMsg('Trade error: ' + (e.message||e)); }
+  }
+
+  btnBuy.onclick = ()=>trade('buy');
+  btnSell.onclick = ()=>trade('sell');
+
+  // ---------- UI helpers ----------
+  async function refreshUI(){
+    if(!currentUser) return;
+    const snap = await db.collection('users').doc(currentUser.uid).get();
+    if(!snap.exists) return;
+    const data = snap.data();
+    balanceEl.textContent = formatMoney(Number(data.balance||0));
+    balanceEl2.textContent = formatMoney(Number(data.balance||0));
+    renderPortfolio(data.portfolio || {});
+    loadTransactions(currentUser.uid);
+  }
+
+  function renderPortfolio(port){
+    portfolioTableBody.innerHTML = '';
+    const syms = Object.keys(port || {});
+    if(syms.length === 0){ portfolioTableBody.innerHTML = '<tr><td colspan="4" class="muted">No positions</td></tr>'; updatePortfolioChart({}); return; }
+    Promise.all(syms.map(s=>fetchQuote(s))).then(results=>{
+      let totalValue = 0;
+      for(let i=0;i<syms.length;i++){
+        const s = syms[i];
+        const qty = port[s];
+        const q = results[i] || {};
+        const price = Number(q.c||0);
+        const val = price * qty;
+        totalValue += val;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${s}</td><td>${qty}</td><td>$${formatMoney(price)}</td><td>$${formatMoney(val)}</td>`;
+        portfolioTableBody.appendChild(tr);
+      }
+      updatePortfolioChart(port);
+    });
+  }
+
+  // ---------- transactions ----------
+  async function loadTransactions(uid){
+    txList.innerHTML = 'Loading...';
+    const snaps = await db.collection('users').doc(uid).collection('transactions').orderBy('timestamp','desc').limit(50).get();
+    if(snaps.empty){ txList.innerHTML = '<div class="muted small">No transactions</div>'; return; }
+    let html = '';
+    snaps.forEach(d=>{
+      const t = d.data();
+      const time = t.timestamp ? new Date(t.timestamp.toDate()).toLocaleString() : '-';
+      html += `<div><b>${t.type.toUpperCase()}</b> ${t.qty} ${t.symbol} @ $${formatMoney(t.price)} <span class="muted">(${time})</span></div>`;
+    });
+    txList.innerHTML = html;
+  }
+
+  // ---------- leaderboard (admin only) ----------
+  async function loadLeaderboard(){
+    const snaps = await db.collection('users').orderBy('balance','desc').limit(10).get();
+    let html = '<ol>';
+    snaps.forEach(d=> html += `<li>${d.id} — $${formatMoney(d.data().balance||0)}</li>`);
+    html += '</ol>';
+    leaderboard.innerHTML = html;
+  }
+
+  // ---------- admin functions ----------
+  btnReloadUsers.onclick = async ()=> {
+    const snaps = await db.collection('users').get();
+    let html = '';
+    snaps.forEach(d=> html += `<div><b>${d.id}</b> — $${formatMoney(d.data().balance||0)}</div>`);
+    document.getElementById('adminUsers').innerHTML = html;
+  };
+
+  btnResetBalances.onclick = async ()=> {
+    if(!confirm('Reset all balances to $100000?')) return;
+    const snaps = await db.collection('users').get();
+    const batch = db.batch();
+    snaps.forEach(d=> batch.set(d.ref, { balance: 100000, portfolio: {} }, { merge: true }));
+    await batch.commit();
+    alert('All balances reset');
+    btnReloadUsers.click();
+  };
+
+  btnEditWatchlist.onclick = ()=> {
+    editWatchlist.value = WATCHLIST.join(',');
+    adminCard.scrollIntoView({behavior:'smooth'});
+  };
+
+  btnSaveWatchlist.onclick = async ()=> {
+    if(adminCard.classList.contains('hidden')){ setAuthMsg('Only admin can save watchlist'); return; }
+    const raw = editWatchlist.value.trim();
+    if(!raw) return setAuthMsg('Enter comma-separated symbols');
+    WATCHLIST = raw.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+    await saveWatchlistToFirestore();
+    renderWatchlist();
+  };
+
+  async function saveWatchlistToFirestore(){
+    await db.collection('settings').doc('watchlist').set({ symbols: WATCHLIST });
+    setAuthMsg('Watchlist saved');
+  }
+
+  // ---------- portfolio chart ----------
+  let portfolioChart = null;
+  function updatePortfolioChart(port){
+    const entries = Object.entries(port||{});
+    const labels = entries.map(e=>e[0]);
+    const data = entries.map(e=>e[1]);
+    if(!portfolioChart){
+      const ctx = document.getElementById('portfolioChart').getContext('2d');
+      portfolioChart = new Chart(ctx, { type:'doughnut', data:{labels,datasets:[{data}]}, options:{responsive:true,plugins:{legend:{position:'bottom'}}} });
+    } else {
+      portfolioChart.data.labels = labels;
+      portfolioChart.data.datasets[0].data = data;
+      portfolioChart.update();
+    }
+  }
+
+  // ---------- misc UI ----------
+  btnRefresh.onclick = async ()=> { setAuthMsg('Refreshing...'); await refreshAllPrices(); setAuthMsg('Prices updated'); };
+  selectedSymbol.onchange = ()=> { showTradingView(selectedSymbol.value); displayQuote(selectedSymbol.value); };
+
+  // ---------- periodic updates ----------
+  setInterval(async ()=>{ try{ await refreshAllPrices(); loadLeaderboard(); } catch(e){} }, 30*1000);
+
+  // ---------- start ----------
+  (async function init(){
+    setAuthMsg('Ready — sign in, use common password or guest');
+    await loadWatchlistFromFirestore();
+    await refreshAllPrices();
+    // default chart if watchlist exists
+    if(WATCHLIST.length) showTradingView(WATCHLIST[0]);
+  })();
+
+  </script>
+</body>
+</html>
+
